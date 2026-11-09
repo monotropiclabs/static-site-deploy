@@ -1,0 +1,70 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DNS-validated public certificate. Add its validation CNAMEs at your DNS provider, then rerun setup.",
+  "Parameters": {
+    "DomainName": {
+      "Type": "String"
+    },
+    "RedirectDomains": {
+      "Type": "CommaDelimitedList",
+      "Default": ""
+    }
+  },
+  "Conditions": {
+    "HasRedirects": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "RedirectDomains"
+                }
+              ]
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "Certificate": {
+      "Type": "AWS::CertificateManager::Certificate",
+      "Properties": {
+        "DomainName": {
+          "Ref": "DomainName"
+        },
+        "SubjectAlternativeNames": {
+          "Fn::If": [
+            "HasRedirects",
+            {
+              "Ref": "RedirectDomains"
+            },
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
+        "ValidationMethod": "DNS",
+        "CertificateExport": "DISABLED",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "static-site-deploy"
+          }
+        ]
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    }
+  },
+  "Outputs": {
+    "CertificateArn": {
+      "Value": {
+        "Ref": "Certificate"
+      }
+    }
+  }
+}

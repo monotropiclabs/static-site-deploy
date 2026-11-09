@@ -1,0 +1,11 @@
+{
+  "name": "example",
+  "domain": "example.com",
+  "redirect_domains": ["www.example.com"],
+  "github_repository": "monotropiclabs/example",
+  "branch": "main",
+  "aws_account_id": "123456789012",
+  "aws_region": "us-east-1",
+  "build_command": "docker compose run --rm --build build",
+  "output_directory": "_site"
+}

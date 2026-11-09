@@ -1,0 +1,21 @@
+name: Check deployment tooling
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check routing and configuration
+        run: python3 -m unittest discover -s tests -v
+      - name: Validate infrastructure templates
+        run: |
+          python3 -m venv /tmp/static-site-checks
+          /tmp/static-site-checks/bin/pip install 'cfn-lint>=1.31,<2'
+          ./site render --config site.example.json > /tmp/static-site-template.json
+          /tmp/static-site-checks/bin/cfn-lint --ignore-checks W --template cloudformation/account.json cloudformation/certificate.json /tmp/static-site-template.json

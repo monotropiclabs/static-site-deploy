@@ -1,0 +1,30 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Shared GitHub Actions identity provider for static sites. Reuse an existing provider instead of creating another.",
+  "Resources": {
+    "GitHubProvider": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": [
+          "sts.amazonaws.com"
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "static-site-deploy"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ProviderArn": {
+      "Value": {
+        "Ref": "GitHubProvider"
+      }
+    }
+  }
+}

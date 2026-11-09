@@ -1,0 +1,131 @@
+name: Deploy static site
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path to the site's JSON configuration
+        type: string
+        default: site.json
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: static-site-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out website
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Read site configuration
+        id: site
+        env:
+          CONFIG_PATH: ${{ inputs.config }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          config = json.loads(Path(os.environ['CONFIG_PATH']).read_text())
+          required = {'name', 'domain', 'redirect_domains', 'github_repository', 'branch', 'aws_account_id', 'aws_region', 'build_command', 'output_directory'}
+          if set(config) != required:
+              raise SystemExit('Unexpected or missing site.json fields')
+          for key in required - {'redirect_domains'}:
+              if not isinstance(config[key], str) or not config[key] or '\n' in config[key] or '\r' in config[key]:
+                  raise SystemExit(f'Invalid {key}')
+          if not re.fullmatch(r'[a-z][a-z0-9-]{0,23}', config['name']):
+              raise SystemExit('Invalid site name')
+          if not re.fullmatch(r'\d{12}', config['aws_account_id']) or config['aws_region'] != 'us-east-1':
+              raise SystemExit('Invalid AWS account or region')
+          if config['github_repository'].lower() != os.environ['GITHUB_REPOSITORY'].lower():
+              raise SystemExit('This configuration belongs to another repository')
+          if os.environ['GITHUB_REF'] != 'refs/heads/' + config['branch']:
+              raise SystemExit('Deployments are restricted to the configured branch')
+          output = Path(config['output_directory'])
+          if output.is_absolute() or not output.parts or any(part in ('..', '.git', '.github') for part in output.parts):
+              raise SystemExit('Output must be a child directory of the repository')
+          values = {
+              'account': config['aws_account_id'], 'region': config['aws_region'],
+              'role': f"arn:aws:iam::{config['aws_account_id']}:role/static-site-{config['name']}-deploy",
+              'stack': 'static-site-' + config['name'], 'build': config['build_command'],
+              'output': config['output_directory']
+          }
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as target:
+              for key, value in values.items():
+                  target.write(f'{key}={value}\n')
+          PY
+
+      - name: Build website
+        env:
+          BUILD_COMMAND: ${{ steps.site.outputs.build }}
+        run: bash -eo pipefail -c "$BUILD_COMMAND"
+
+      - name: Check deployment output
+        env:
+          OUTPUT_DIRECTORY: ${{ steps.site.outputs.output }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          output = Path(os.environ['OUTPUT_DIRECTORY'])
+          if root not in output.resolve().parents:
+              raise SystemExit('Build output escapes the repository')
+          if not (output / 'index.html').is_file():
+              raise SystemExit('Missing build output/index.html')
+          if output.is_symlink() or any(path.is_symlink() for path in output.rglob('*')):
+              raise SystemExit('Symbolic links are not allowed in build output')
+          for name in ('.git', '.github', 'site.json', 'Gemfile', 'Dockerfile'):
+              if (output / name).exists():
+                  raise SystemExit(f'Source file found in build output: {name}')
+          PY
+
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ steps.site.outputs.role }}
+          aws-region: ${{ steps.site.outputs.region }}
+          allowed-account-ids: ${{ steps.site.outputs.account }}
+
+      - name: Read infrastructure outputs
+        env:
+          STACK_NAME: ${{ steps.site.outputs.stack }}
+          OUTPUT_DIRECTORY: ${{ steps.site.outputs.output }}
+        run: |
+          aws cloudformation describe-stacks --stack-name "$STACK_NAME" --output json > "$RUNNER_TEMP/static-site-stack.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          stack = json.loads((Path(os.environ['RUNNER_TEMP']) / 'static-site-stack.json').read_text())['Stacks'][0]
+          if stack['StackStatus'] not in ('CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE'):
+              raise SystemExit('Infrastructure update is incomplete')
+          outputs = {item['OutputKey']: item['OutputValue'] for item in stack['Outputs']}
+          with open(os.environ['GITHUB_ENV'], 'a') as target:
+              for name, key in [('SITE_BUCKET', 'BucketName'), ('SITE_DISTRIBUTION', 'DistributionId'), ('SITE_URL', 'SiteUrl')]:
+                  target.write(f'{name}={outputs[key]}\n')
+          PY
+
+      - name: Synchronize files
+        run: |
+          aws s3 sync "$OUTPUT_DIRECTORY/" "s3://$SITE_BUCKET/" \
+            --delete --no-follow-symlinks --only-show-errors \
+            --cache-control 'public,max-age=60,s-maxage=86400'
+        env:
+          OUTPUT_DIRECTORY: ${{ steps.site.outputs.output }}
+
+      - name: Refresh CloudFront
+        run: |
+          invalidation_id=$(aws cloudfront create-invalidation \
+            --distribution-id "$SITE_DISTRIBUTION" --paths '/*' \
+            --query 'Invalidation.Id' --output text)
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$SITE_DISTRIBUTION" --id "$invalidation_id"
+          echo "Deployed $SITE_URL at commit $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
