@@ -1,10 +1,44 @@
 # Static site deployments
 
-Plain S3 and CloudFront hosting for Monotropic's static sites. CloudFormation owns the infrastructure; GitHub Actions runs each site's build, uploads its output, and invalidates the CDN.
+Plain S3 and CloudFront hosting for static sites. CloudFormation owns the infrastructure; GitHub Actions runs each site's build, uploads its output, and invalidates the CDN.
 
-This public deployment repository can be reused by website repositories in multiple GitHub organizations, including `monotropiclabs` and `tastebudteam`. Website repositories can remain private. The S3 buckets block public access and CloudFront authenticates through Origin Access Control. Each website has its own bucket, distribution, and deployment role. Deployments can update that site's files and cache, but cannot modify infrastructure.
+This public deployment repository can be reused by website repositories in any GitHub organization. Website repositories can remain private. The S3 buckets block public access and CloudFront authenticates through Origin Access Control. Each website has its own bucket, distribution, and deployment role. Deployments can update that site's files and cache, but cannot modify infrastructure.
 
-## Use it
+## Use it with your agent
+
+Open your site's repository in your preferred agent and give it this prompt:
+
+```
+Deploy this static site using:
+https://github.com/monotropiclabs/static-site-deploy/blob/v1/RUNBOOK.md
+
+Domain: YOUR_DOMAIN
+Local AWS profile: YOUR_PROFILE
+
+Infer the GitHub repository, production branch, build command,
+and output directory from this project. Discover the AWS account
+ID from the profile. Use us-east-1 and a unique site name.
+
+Create the site configuration, shared deployment workflow,
+and agent instructions. Provision AWS, commit and push the
+configuration, and verify the first automatic deployment.
+
+Guide me through certificate validation and DNS cutover, then
+verify the live site, HTTPS, redirects, and private S3 access.
+
+If permissions are missing, generate the exact customer-managed
+IAM policy and tell me where to attach it. Give me exact DNS
+records when needed.
+
+Handle everything you can directly. Pause only for account
+access, permission grants, or DNS changes that require me.
+```
+
+Replace only YOUR_DOMAIN and YOUR_PROFILE.
+
+After setup, pushing to main deploys updates automatically.
+
+## Use it manually
 
 See [RUNBOOK.md](RUNBOOK.md) for the complete setup, deployment, upgrade, and troubleshooting instructions. Codex and Claude use that same document through [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md).
 
