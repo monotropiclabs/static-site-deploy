@@ -2,7 +2,7 @@
 
 Plain S3 and CloudFront hosting for Monotropic's static sites. CloudFormation owns the infrastructure; GitHub Actions runs each site's build, uploads its output, and invalidates the CDN.
 
-The website repositories remain private. The S3 buckets block public access and CloudFront authenticates through Origin Access Control. Each website has its own bucket, distribution, and deployment role. Deployments can update that site's files and cache, but cannot modify infrastructure.
+This public deployment repository can be reused by website repositories in multiple GitHub organizations, including `monotropiclabs` and `tastebudteam`. Website repositories can remain private. The S3 buckets block public access and CloudFront authenticates through Origin Access Control. Each website has its own bucket, distribution, and deployment role. Deployments can update that site's files and cache, but cannot modify infrastructure.
 
 ## Use it
 

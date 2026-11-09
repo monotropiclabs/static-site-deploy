@@ -16,15 +16,17 @@ This is the shared procedure for humans, Codex, and Claude. User instructions in
 
 ## One-time shared repository setup
 
-1. Keep this repository private in the same GitHub organization as the private website repositories.
-2. In repository Settings → Actions → General → Access, allow other repositories in the organization to use its workflows.
+1. Keep this deployment repository public so website repositories in different organizations can use the same workflow. The website repositories can remain private.
+2. If a caller's organization restricts allowed actions and reusable workflows, allow `monotropiclabs/static-site-deploy` in its Actions settings.
 3. Publish a tested `v1` tag. The caller workflow refers to that tag.
 
-The GitHub CLI equivalent of the access setting is:
+### Use another GitHub organization
 
-```sh
-gh api --method PUT repos/monotropiclabs/static-site-deploy/actions/permissions/access -f access_level=organization
-```
+The workflow reference stays `monotropiclabs/static-site-deploy/.github/workflows/deploy.yml@v1`, including for sites in `tastebudteam`.
+
+Set each website's `github_repository` in `site.json` to its own `owner/repository`, for example `tastebudteam/website`. Choose a unique `name` across all organizations deploying into the same AWS account: stack, role, and bucket names are based on that name.
+
+Use the usual setup command and AWS profile. Setup reuses the account's GitHub OIDC provider and creates a per-site role trusting the configured repository and production branch. Repository metadata supplies the owner and repository IDs automatically.
 
 ## Add a website
 
@@ -115,4 +117,4 @@ Use `./site render --config ...` to inspect the exact site template, `./site out
 - [CloudFront OAC](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
 - [CloudFront certificate region](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html)
 - [GitHub OIDC in AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
-- [Shared private workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/share-with-your-organization)
+- [Reusable workflow access](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#access-to-reusable-workflows)
