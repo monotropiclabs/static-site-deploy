@@ -136,6 +136,14 @@ class Site:
         parameters = {"DomainName": self.config["domain"], "RedirectDomains": ",".join(self.config["redirect_domains"])}
         values = [{"ParameterKey": key, "ParameterValue": value} for key, value in parameters.items()]
         existing = self.stack_info(name)
+        if existing is not None and existing["StackStatus"] == "ROLLBACK_COMPLETE":
+            resources = self.aws_json("cloudformation", "describe-stack-resources", "--stack-name", name)["StackResources"]
+            if any(item.get("PhysicalResourceId") for item in resources):
+                raise ValueError(f"{name} failed and still contains resources; inspect it before retrying")
+            print(f"Removing empty failed certificate stack {name} before retrying…", flush=True)
+            self.aws("cloudformation", "delete-stack", "--stack-name", name)
+            self.aws("cloudformation", "wait", "stack-delete-complete", "--stack-name", name)
+            existing = None
         template = str(ROOT / "cloudformation/certificate.json")
         if existing is None:
             self.aws("cloudformation", "create-stack", "--stack-name", name, "--template-body", f"file://{template}",
@@ -153,6 +161,12 @@ class Site:
             try:
                 resource = self.aws_json("cloudformation", "describe-stack-resource", "--stack-name", name,
                                          "--logical-resource-id", "Certificate")["StackResourceDetail"]
+                if resource.get("ResourceStatus") in ("CREATE_FAILED", "DELETE_SKIPPED", "DELETE_COMPLETE"):
+                    events = self.aws_json("cloudformation", "describe-stack-events", "--stack-name", name)["StackEvents"]
+                    reason = next((event.get("ResourceStatusReason", "Unknown AWS error") for event in events
+                                   if event.get("LogicalResourceId") == "Certificate" and event.get("ResourceStatus") == "CREATE_FAILED"),
+                                  resource.get("ResourceStatusReason", "Certificate creation failed; inspect stack events"))
+                    raise ValueError(f"Certificate creation failed: {reason}")
                 if resource.get("PhysicalResourceId"):
                     certificate = self.aws_json("acm", "describe-certificate", "--certificate-arn", resource["PhysicalResourceId"])["Certificate"]
                     expected_domains = {self.config["domain"], *self.config["redirect_domains"]}
@@ -232,13 +246,13 @@ def provisioning_policy(config):
         return {"Effect": "Allow", "Action": actions, "Resource": resources, **extra}
     return {"Version": "2012-10-17", "Statement": [
         allow(["cloudformation:CreateStack", "cloudformation:UpdateStack", "cloudformation:DescribeStacks", "cloudformation:DescribeStackEvents", "cloudformation:DescribeStackResource", "cloudformation:DescribeStackResources", "cloudformation:ListStackResources", "cloudformation:CreateChangeSet", "cloudformation:DescribeChangeSet", "cloudformation:ExecuteChangeSet", "cloudformation:DeleteChangeSet", "cloudformation:GetTemplate"], stack_arns),
+        allow("cloudformation:DeleteStack", f"arn:aws:cloudformation:{region}:{account}:stack/static-site-*-certificate/*"),
         allow(["cloudformation:ValidateTemplate", "cloudformation:GetTemplateSummary"], "*"),
         allow("iam:ListOpenIDConnectProviders", "*"),
         allow(["iam:CreateOpenIDConnectProvider", "iam:GetOpenIDConnectProvider", "iam:TagOpenIDConnectProvider"], f"arn:aws:iam::{account}:oidc-provider/token.actions.githubusercontent.com"),
         allow(["iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:UpdateRole", "iam:UpdateRoleDescription", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:TagRole", "iam:UntagRole"], f"arn:aws:iam::{account}:role/static-site-*-deploy"),
-        allow("acm:RequestCertificate", "*", Condition={"StringEquals": {"aws:RequestTag/ManagedBy": "static-site-deploy"}}),
-        allow("acm:AddTagsToCertificate", f"arn:aws:acm:{region}:{account}:certificate/*", Condition={"StringEquals": {"aws:RequestTag/ManagedBy": "static-site-deploy"}}),
-        allow(["acm:DescribeCertificate", "acm:GetCertificate", "acm:ListTagsForCertificate", "acm:RemoveTagsFromCertificate", "acm:DeleteCertificate"], f"arn:aws:acm:{region}:{account}:certificate/*", Condition={"StringEquals": {"aws:ResourceTag/ManagedBy": "static-site-deploy"}}),
+        allow("acm:RequestCertificate", "*"),
+        allow(["acm:DescribeCertificate", "acm:GetCertificate", "acm:ListTagsForCertificate", "acm:AddTagsToCertificate", "acm:RemoveTagsFromCertificate", "acm:DeleteCertificate"], f"arn:aws:acm:{region}:{account}:certificate/*"),
         allow(["s3:CreateBucket", "s3:DeleteBucket", "s3:GetBucket*", "s3:PutBucket*", "s3:DeleteBucketPolicy", "s3:GetEncryptionConfiguration", "s3:PutEncryptionConfiguration", "s3:ListBucket"], f"arn:aws:s3:::static-site-*-{account}-{region}"),
         allow(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], f"arn:aws:s3:::static-site-*-{account}-{region}/*"),
         allow(["cloudfront:CreateDistribution", "cloudfront:CreateFunction"], "*"),

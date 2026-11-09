@@ -11,7 +11,7 @@ This is the shared procedure for humans, Codex, and Claude. User instructions in
 - Resource names, account, repository, domain, and build settings come from `site.json`.
 - AWS stack outputs are the source of truth for the bucket and distribution IDs; do not copy them into GitHub secrets or configuration.
 - DNS stays with the existing provider. The setup command prints the required records.
-- The site bucket and shared OIDC provider are retained if their stacks are deleted. There is no automated destroy command.
+- The site bucket and shared OIDC provider are retained if their stacks are deleted. There is no automated destroy command. Setup can remove an empty failed certificate stack before retrying, but refuses to do so when any physical resource exists.
 - This publishes multi-page static sites. Extensionless routes are directories with `index.html`; this is not an SPA fallback.
 
 ## One-time shared repository setup
@@ -78,7 +78,7 @@ Generate a reviewable IAM policy for the configured AWS account:
 ./site policy --config /path/to/website/site.json > /tmp/static-sites-provisioning-policy.json
 ```
 
-An account administrator can create a customer-managed policy from that JSON and attach it to the setup identity. The generated policy exceeds the IAM user inline-policy size limit, so use a managed policy for IAM users. IAM roles, buckets and stacks are restricted to the static-site naming prefixes. CloudFront distribution operations cover the account's distributions because IDs are assigned at creation; distribution/function creation and origin access control operations require wildcard scope. Certificate requests require the `ManagedBy=static-site-deploy` tag. Treat this as a trusted provisioning policy, not a runtime deployment policy. Existing permission boundaries, SCPs, or explicit denies may require administrator changes.
+An account administrator can create a customer-managed policy from that JSON and attach it to the setup identity. The generated policy exceeds the IAM user inline-policy size limit, so use a managed policy for IAM users. IAM roles, buckets and stacks are restricted to the static-site naming prefixes. CloudFront distribution operations cover the account's distributions because IDs are assigned at creation; distribution/function creation and origin access control operations require wildcard scope. ACM operations cover certificates in the configured account and region, with wildcard scope for requests. The template applies the `ManagedBy=static-site-deploy` tag, but the permission policy cannot require it during creation because CloudFormation applies it after the initial request. Treat this as a trusted provisioning policy, not a runtime deployment policy. Existing permission boundaries, SCPs, or explicit denies may require administrator changes.
 
 ## Ordinary changes and deployments
 

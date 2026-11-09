@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('site_deploy', ROOT / 'scripts/site.py')
@@ -97,6 +98,48 @@ class RouterTests(unittest.TestCase):
         result = self.route('/philosophy/', 'd123.cloudfront.net')
         self.assertEqual(result['uri'], '/philosophy/index.html')
         self.assertNotIn('statusCode', result)
+
+
+class CertificateTests(unittest.TestCase):
+    def test_aws_creation_failure_is_reported_immediately(self):
+        instance = site.Site(CONFIG)
+        responses = [
+            {'StackResourceDetail': {'ResourceStatus': 'DELETE_SKIPPED'}},
+            {'StackEvents': [{'LogicalResourceId': 'Certificate', 'ResourceStatus': 'CREATE_FAILED', 'ResourceStatusReason': 'AccessDenied: acm:RequestCertificate'}]},
+        ]
+        with patch.object(instance, 'stack_info', return_value={'StackStatus': 'CREATE_IN_PROGRESS'}), \
+             patch.object(instance, 'aws_json', side_effect=responses), \
+             patch('time.sleep') as sleep:
+            with self.assertRaisesRegex(ValueError, 'AccessDenied: acm:RequestCertificate'):
+                instance.certificate()
+            sleep.assert_not_called()
+
+    def test_failed_stack_with_certificate_is_preserved(self):
+        instance = site.Site(CONFIG)
+        with patch.object(instance, 'stack_info', return_value={'StackStatus': 'ROLLBACK_COMPLETE'}), \
+             patch.object(instance, 'aws_json', return_value={'StackResources': [{'PhysicalResourceId': 'arn:aws:acm:us-east-1:123456789012:certificate/existing'}]}), \
+             patch.object(instance, 'aws') as mutate:
+            with self.assertRaisesRegex(ValueError, 'still contains resources'):
+                instance.certificate()
+            mutate.assert_not_called()
+
+    def test_empty_failed_stack_can_retry_and_print_validation(self):
+        instance = site.Site(CONFIG)
+        record = {'Name': '_abc.example.com.', 'Type': 'CNAME', 'Value': '_abc.acm-validations.aws.'}
+        certificate = {'Status': 'PENDING_VALIDATION', 'SubjectAlternativeNames': ['example.com', 'www.example.com'], 'DomainValidationOptions': [{'ResourceRecord': record}]}
+        responses = [
+            {'StackResources': [{'ResourceStatus': 'DELETE_SKIPPED'}]},
+            {'StackResourceDetail': {'ResourceStatus': 'CREATE_IN_PROGRESS', 'PhysicalResourceId': 'arn:aws:acm:us-east-1:123456789012:certificate/new'}},
+            {'Certificate': certificate},
+        ]
+        with patch.object(instance, 'stack_info', return_value={'StackStatus': 'ROLLBACK_COMPLETE'}), \
+             patch.object(instance, 'aws_json', side_effect=responses), \
+             patch.object(instance, 'aws') as mutate:
+            result, records = instance.certificate()
+            self.assertEqual(result['Status'], 'PENDING_VALIDATION')
+            self.assertEqual(records, [record])
+            calls = [call.args[:2] for call in mutate.call_args_list]
+            self.assertEqual(calls, [('cloudformation', 'delete-stack'), ('cloudformation', 'wait'), ('cloudformation', 'create-stack')])
 
 
 if __name__ == '__main__':
